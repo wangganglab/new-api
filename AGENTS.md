@@ -24,6 +24,61 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - JavaScript task plugins live in `plugins/tasks/`, run through `pkg/jsplugin/`, and integrate with host task polling and settlement.
 - `web/` is the React frontend (see `web/AGENTS.md`); `electron/` is the desktop wrapper.
 
+## Branch & Upstream Sync Workflow
+
+Fork topology (remotes):
+
+- `upstream` = `QuantumNous/new-api` (original repo; fetch-only, never push)
+- `origin` = `wangganglab/new-api` (fork; push target)
+
+Branch model:
+
+- `main` — clean mirror of upstream `main`. NEVER add custom commits to it. It must always be fast-forwardable to `upstream/main`.
+- `ferry` — the only custom branch. Deployments are built from it. All custom work lives here as a small set of feature commits on top of `main`.
+
+Custom commits currently on `ferry` (keep intact across merges):
+
+1. `feat: 微信/支付宝原生扫码支付` — WeChat/Alipay native QR payment (ported from upstream PR #7055; touches `controller/topup_native_qr.go`, `service/native_pay.go`, `web/src/features/wallet/`, payment settings UI, i18n)
+2. `feat(web): 控制台隐藏搜索框` — `authenticated-layout.tsx` sets `<AppHeader showSearch={false} />`
+3. `fix(web): 移除页首版本更新提示` — header version-update notice removed
+
+Do not re-add branding/logo changes; the fork intentionally ships upstream default branding.
+
+### Syncing upstream into `ferry` (standard procedure)
+
+Run in order; stop on any conflict and resolve before continuing:
+
+```bash
+# 1. Fetch upstream
+git fetch upstream --prune
+
+# 2. Fast-forward main (must always be a fast-forward; if it is not, main has diverged — investigate, do not force)
+git checkout main
+git merge --ff-only upstream/main
+git push origin main
+
+# 3. Merge main into ferry
+git checkout ferry
+git merge main --no-edit
+# resolve conflicts if any; custom files: web/src/components/layout/components/{public-header,system-brand}.tsx,
+# authenticated-layout.tsx, wallet/payment files, i18n locales
+
+# 4. Build & verify locally before pushing
+DOCKER_BUILDKIT=0 docker build -t ferry-newapi:smoke .
+docker compose up -d --no-deps --force-recreate new-api   # run from the Ferry repo root (docker-compose.override.yml points at ferry-newapi:smoke)
+curl -f http://localhost:3000/api/status                  # expect 200
+
+# 5. Push
+git push origin ferry
+```
+
+Rules:
+
+- `main` is fast-forward only. If `git merge --ff-only upstream/main` fails, someone committed to `main` — investigate instead of forcing.
+- Never merge `ferry` into `main`; that would destroy the clean-mirror property.
+- After merging, confirm the three custom commits above still work (payment endpoints registered, search box hidden, no version notice) and that branding files match upstream.
+- Check `git rev-list --left-right --count upstream/main...ferry` to see how far behind `ferry` is at any time.
+
 ## Internationalization (i18n)
 
 ### Backend (`i18n/`)
